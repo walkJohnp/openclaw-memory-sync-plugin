@@ -1,0 +1,46 @@
+{
+  "name": "openclaw-memory-sync",
+  "version": "0.1.0",
+  "description": "OpenClaw memory synchronization plugin - sync agent memories to Feishu cloud",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "sync": "node dist/cmd/sync.js",
+    "config": "node dist/cmd/config.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --reporters=default --reporters=jest-junit",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": [
+    "openclaw",
+    "memory",
+    "sync",
+    "feishu"
+  ],
+  "author": "OpenClaw",
+  "license": "MIT",
+  "dependencies": {
+    "@types/glob": "^8.1.0",
+    "chokidar": "^3.5.3",
+    "crypto-js": "^4.2.0",
+    "glob": "^13.0.6",
+    "yaml": "^2.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/jest": "^29.5.0",
+    "typescript": "^5.3.0",
+    "ts-jest": "^29.1.0",
+    "jest": "^29.7.0",
+    "jest-junit": "^16.0.0",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "prettier": "^3.1.0"
+  }
+}

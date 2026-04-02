@@ -1,0 +1,58 @@
+# OpenClaw Memory Sync Plugin - Default Configuration
+
+memory_sync:
+  # 同步源配置
+  source:
+    # 工作空间路径
+    workspace: "~/.openclaw/workspace/pm"
+    # 包含的文件模式
+    include:
+      - "MEMORY.md"
+      - "memory/*.md"
+      - "AGENTS.md"
+      - "SOUL.md"
+      - "USER.md"
+      - "HEARTBEAT.md"
+      - "TOOLS.md"
+      - "IDENTITY.md"
+    # 排除的文件模式
+    exclude:
+      - "*.secret.md"
+      - "*.local.md"
+      - "node_modules/**"
+      - ".*/**"
+  
+  # 飞书目标配置
+  target:
+    # 目标文件夹 token（可选，为空则创建新文件夹）
+    folder_token: ""
+    # 根文档名称
+    doc_name: "OpenClaw记忆中心"
+    # 是否按类型分文档存储
+    categorize: true
+  
+  # 同步策略
+  strategy:
+    # 冲突解决策略: local_priority | remote_priority | manual
+    conflict_resolution: "local_priority"
+    # 同步模式: incremental | full
+    sync_mode: "incremental"
+    # 是否删除云端已不存在的本地文件
+    delete_remote: false
+  
+  # 自动同步配置
+  schedule:
+    enabled: false
+    # 同步间隔: 15m | 30m | 1h | 6h | 1d
+    interval: "1h"
+  
+  # 高级选项
+  advanced:
+    # 文件监听（实时同步）
+    watch: false
+    # 压缩传输
+    compress: false
+    # 保留历史版本
+    keep_history: true
+    # 日志级别: debug | info | warn | error
+    log_level: "info"

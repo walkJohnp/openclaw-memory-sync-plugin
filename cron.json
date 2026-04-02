@@ -1,0 +1,11 @@
+{
+  "name": "memory-sync-auto-improve",
+  "description": "Auto-improve memory-sync plugin every 20 minutes",
+  "schedule": "*/20 * * * *",
+  "command": "cd ~/.openclaw/extensions/memory-sync && npm test 2>&1 && npm run build 2>&1",
+  "enabled": true,
+  "notifications": {
+    "onError": true,
+    "onSuccess": false
+  }
+}
