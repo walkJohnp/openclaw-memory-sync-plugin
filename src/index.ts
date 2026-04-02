@@ -7,6 +7,7 @@ export { MemoryScanner } from './scanner';
 export { SyncServiceClient } from './service-client';
 export { SyncEngine } from './sync';
 export { ConfigManager } from './config';
+export { Scheduler } from './scheduler';
 export * from './types';
 export { logger } from './utils/logger';
 

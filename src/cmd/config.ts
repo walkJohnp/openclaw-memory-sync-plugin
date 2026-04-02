@@ -71,24 +71,18 @@ async function runWizard(configManager: ConfigManager) {
     config.source.workspace
   );
 
-  // Target
-  config.target.docName = await prompt(
-    'Document name',
-    config.target.docName
+  // Service
+  config.service.serverUrl = await prompt(
+    'Sync service URL',
+    config.service.serverUrl
   );
 
-  config.target.folderToken = await prompt(
-    'Folder token (optional)',
-    config.target.folderToken
+  config.service.apiKey = await prompt(
+    'API key (optional)',
+    config.service.apiKey
   );
 
   // Strategy
-  const conflictRes = await prompt(
-    'Conflict resolution (local_priority/remote_priority/manual)',
-    config.strategy.conflictResolution
-  );
-  config.strategy.conflictResolution = conflictRes as any;
-
   const syncMode = await prompt(
     'Sync mode (incremental/full)',
     config.strategy.syncMode

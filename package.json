@@ -9,6 +9,8 @@
     "dev": "tsc --watch",
     "sync": "node dist/cmd/sync.js",
     "config": "node dist/cmd/config.js",
+    "scheduler": "node dist/scheduler.js",
+    "watch": "node dist/watch.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
