@@ -27,7 +27,7 @@ export class SyncServiceClient {
    */
   async health(): Promise<ServiceHealth | null> {
     try {
-      const response = await this.fetchWithTimeout('/api/health');
+      const response = await this.fetchWithTimeout('/health');
       if (!response.ok) {
         logger.warn(`Service health check failed: ${response.status}`);
         return null;
@@ -44,12 +44,33 @@ export class SyncServiceClient {
    */
   async listFiles(): Promise<RemoteFileInfo[]> {
     try {
-      const response = await this.fetchWithTimeout('/api/files');
+      const response = await this.fetchWithTimeout('/api/v1/files');
       if (!response.ok) {
         throw new Error(`Failed to list files: ${response.status}`);
       }
-      const result = await response.json() as SyncServiceResponse<RemoteFileInfo[]>;
-      return result.data || [];
+      const result = await response.json() as { 
+        files: Array<{
+          id: number;
+          file_name: string;
+          original_name: string;
+          file_path: string;
+          file_hash: string;
+          file_size: number;
+          mime_type: string;
+          created_at: string;
+        }>; 
+        count: number 
+      };
+      
+      // Map service response to RemoteFileInfo
+      return (result.files || []).map(f => ({
+        path: f.file_path || f.original_name,
+        fileId: f.id.toString(),
+        hash: f.file_hash,
+        size: f.file_size,
+        modifiedAt: f.created_at,
+        syncedAt: f.created_at,
+      }));
     } catch (error) {
       logger.error('Failed to list remote files:', error);
       throw error;
@@ -61,12 +82,15 @@ export class SyncServiceClient {
    */
   async uploadFile(file: UploadFileRequest): Promise<UploadFileResponse> {
     try {
-      const response = await this.fetchWithTimeout('/api/files/upload', {
+      // Service expects multipart form data with 'file' field and 'file_path'
+      const formData = new FormData();
+      const blob = new Blob([file.content], { type: 'text/markdown' });
+      formData.append('file', blob, file.path);
+      formData.append('file_path', file.path); // Send the original file path
+      
+      const response = await this.fetchWithTimeout('/api/v1/files', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(file),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -74,12 +98,12 @@ export class SyncServiceClient {
         throw new Error(`Upload failed: ${error}`);
       }
 
-      const result = await response.json() as SyncServiceResponse<UploadFileResponse>;
-      if (!result.success || !result.data) {
-        throw new Error(result.error || 'Upload failed');
-      }
-
-      return result.data;
+      const result = await response.json() as { file?: { file_hash: string; file_path: string } };
+      return {
+        fileId: result.file?.file_hash || file.hash,
+        url: `/api/v1/files/${file.hash}`,
+        syncedAt: new Date().toISOString(),
+      };
     } catch (error) {
       logger.error(`Failed to upload file ${file.path}:`, error);
       throw error;

@@ -94,7 +94,13 @@ export class SyncEngine {
   }
 
   /**
-   * Build sync plan
+   * Build sync plan for incremental synchronization
+   * 
+   * Logic:
+   * 1. New file (not in remote) -> Upload
+   * 2. Modified file (hash changed from remote) -> Upload
+   * 3. Unchanged file (same hash as remote) -> Skip
+   * 4. Deleted file (in remote but not local, if deleteRemote enabled) -> Delete
    */
   private buildSyncPlan(
     localFiles: MemoryFile[],
@@ -104,39 +110,43 @@ export class SyncEngine {
     const uploads: MemoryFile[] = [];
     const deletions: string[] = [];
 
+    // Create lookup maps
     const remoteMap = new Map(remoteFiles.map(f => [f.path, f]));
     const localMap = new Map(localFiles.map(f => [f.path, f]));
     const stateMap = new Map(state.files.map(f => [f.path, f]));
 
-    // Check local files
+    logger.info(`Building sync plan: ${localFiles.length} local, ${remoteFiles.length} remote`);
+
+    // Check each local file
     for (const localFile of localFiles) {
       const remoteFile = remoteMap.get(localFile.path);
       const stateFile = stateMap.get(localFile.path);
 
       if (!remoteFile) {
-        // New file - upload
+        // Case 1: New file - not exists on remote
         uploads.push(localFile);
-        logger.debug(`Plan: upload new file ${localFile.path}`);
+        logger.info(`[NEW] ${localFile.path} -> will upload`);
       } else if (!hashesEqual(localFile.hash, remoteFile.hash)) {
-        // Modified file - upload
+        // Case 2: Modified - hash differs from remote
         uploads.push(localFile);
-        logger.debug(`Plan: upload modified file ${localFile.path}`);
+        logger.info(`[MODIFIED] ${localFile.path} -> will upload (hash changed)`);
       } else {
-        // Unchanged - skip
-        logger.debug(`Plan: skip unchanged file ${localFile.path}`);
+        // Case 3: Unchanged - same hash as remote
+        logger.debug(`[UNCHANGED] ${localFile.path} -> skip`);
       }
     }
 
-    // Check for deletions
+    // Check for deleted files (only if deleteRemote is enabled)
     if (this.config.strategy.deleteRemote) {
       for (const remoteFile of remoteFiles) {
         if (!localMap.has(remoteFile.path)) {
           deletions.push(remoteFile.fileId);
-          logger.debug(`Plan: delete remote file ${remoteFile.path}`);
+          logger.info(`[DELETED] ${remoteFile.path} -> will delete from remote`);
         }
       }
     }
 
+    logger.info(`Sync plan: ${uploads.length} uploads, ${deletions.length} deletions`);
     return { uploads, deletions };
   }
 
