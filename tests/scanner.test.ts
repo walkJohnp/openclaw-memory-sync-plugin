@@ -3,14 +3,14 @@
  */
 
 import { MemoryScanner } from '../src/scanner';
-import { SyncConfig } from '../src/types';
+import { PluginConfig } from '../src/types';
 import * as path from 'path';
 import { createTempDir, cleanupTempDir, createMockFile } from './test-utils';
 
 describe('MemoryScanner', () => {
   let tempDir: string;
   let scanner: MemoryScanner;
-  let config: SyncConfig;
+  let config: PluginConfig;
 
   beforeEach(async () => {
     tempDir = await createTempDir();
@@ -20,13 +20,12 @@ describe('MemoryScanner', () => {
         include: ['MEMORY.md', 'memory/*.md', 'AGENTS.md', 'SOUL.md'],
         exclude: ['*.secret.md', 'node_modules/**'],
       },
-      target: {
-        folderToken: '',
-        docName: 'Test',
-        categorize: true,
+      service: {
+        serverUrl: 'http://localhost:8080',
+        apiKey: '',
+        timeout: 30000,
       },
       strategy: {
-        conflictResolution: 'local_priority',
         syncMode: 'incremental',
         deleteRemote: false,
       },
@@ -37,7 +36,6 @@ describe('MemoryScanner', () => {
       advanced: {
         watch: false,
         compress: false,
-        keepHistory: true,
         logLevel: 'info',
       },
     };

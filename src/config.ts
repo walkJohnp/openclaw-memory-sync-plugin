@@ -5,11 +5,11 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { SyncConfig } from './types';
+import { PluginConfig } from './types';
 import { logger } from './utils/logger';
 
 export class ConfigManager {
-  private config: SyncConfig | null = null;
+  private config: PluginConfig | null = null;
   private configDir: string;
   private stateDir: string;
 
@@ -29,7 +29,7 @@ export class ConfigManager {
   /**
    * Load configuration from file
    */
-  async load(): Promise<SyncConfig> {
+  async load(): Promise<PluginConfig> {
     try {
       await fs.mkdir(this.configDir, { recursive: true });
       
@@ -50,7 +50,7 @@ export class ConfigManager {
   /**
    * Save configuration to file
    */
-  async save(config: SyncConfig): Promise<void> {
+  async save(config: PluginConfig): Promise<void> {
     await fs.mkdir(this.configDir, { recursive: true });
     const content = yaml.stringify({ memory_sync: config });
     await fs.writeFile(this.configFile, content, 'utf-8');
@@ -86,7 +86,7 @@ export class ConfigManager {
   /**
    * Get default configuration
    */
-  getDefaultConfig(): SyncConfig {
+  getDefaultConfig(): PluginConfig {
     const workspace = path.join(process.env.HOME || '', '.openclaw', 'workspace', 'pm');
     
     return {
@@ -109,13 +109,12 @@ export class ConfigManager {
           '.*/**',
         ],
       },
-      target: {
-        folderToken: '',
-        docName: 'OpenClaw记忆中心',
-        categorize: true,
+      service: {
+        serverUrl: 'http://localhost:8080',
+        apiKey: '',
+        timeout: 30000,
       },
       strategy: {
-        conflictResolution: 'local_priority',
         syncMode: 'incremental',
         deleteRemote: false,
       },
@@ -126,7 +125,6 @@ export class ConfigManager {
       advanced: {
         watch: false,
         compress: false,
-        keepHistory: true,
         logLevel: 'info',
       },
     };
@@ -135,20 +133,19 @@ export class ConfigManager {
   /**
    * Validate and normalize configuration
    */
-  private validateConfig(config: any): SyncConfig {
+  private validateConfig(config: any): PluginConfig {
     return {
       source: {
         workspace: config.source?.workspace || '',
         include: config.source?.include || [],
         exclude: config.exclude?.exclude || [],
       },
-      target: {
-        folderToken: config.target?.folderToken || '',
-        docName: config.target?.docName || 'OpenClaw记忆中心',
-        categorize: config.target?.categorize ?? true,
+      service: {
+        serverUrl: config.service?.serverUrl || 'http://localhost:8080',
+        apiKey: config.service?.apiKey || '',
+        timeout: config.service?.timeout || 30000,
       },
       strategy: {
-        conflictResolution: config.strategy?.conflictResolution || 'local_priority',
         syncMode: config.strategy?.syncMode || 'incremental',
         deleteRemote: config.strategy?.deleteRemote ?? false,
       },
@@ -159,7 +156,6 @@ export class ConfigManager {
       advanced: {
         watch: config.advanced?.watch ?? false,
         compress: config.advanced?.compress ?? false,
-        keepHistory: config.advanced?.keepHistory ?? true,
         logLevel: config.advanced?.logLevel || 'info',
       },
     };

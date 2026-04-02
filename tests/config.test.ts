@@ -34,7 +34,7 @@ describe('ConfigManager', () => {
       expect(config).toBeDefined();
       expect(config.source.workspace).toContain('.openclaw/workspace/pm');
       expect(config.source.include).toContain('MEMORY.md');
-      expect(config.target.docName).toBe('OpenClaw记忆中心');
+      expect(config.service.serverUrl).toBe('http://localhost:8080');
       expect(config.strategy.syncMode).toBe('incremental');
     });
   });
@@ -42,12 +42,12 @@ describe('ConfigManager', () => {
   describe('save and load', () => {
     it('should save and load configuration', async () => {
       const defaultConfig = configManager.getDefaultConfig();
-      defaultConfig.target.docName = 'Test Document';
+      defaultConfig.service.serverUrl = 'http://test-server:8080';
 
       await configManager.save(defaultConfig);
       const loaded = await configManager.load();
 
-      expect(loaded.target.docName).toBe('Test Document');
+      expect(loaded.service.serverUrl).toBe('http://test-server:8080');
     });
 
     it('should create config directory if not exists', async () => {
@@ -125,13 +125,13 @@ describe('ConfigManager', () => {
 
     it('should not overwrite existing config', async () => {
       const config = configManager.getDefaultConfig();
-      config.target.docName = 'Custom Name';
+      config.service.serverUrl = 'http://custom-server:8080';
       await configManager.save(config);
 
       await configManager.init();
       const loaded = await configManager.load();
 
-      expect(loaded.target.docName).toBe('Custom Name');
+      expect(loaded.service.serverUrl).toBe('http://custom-server:8080');
     });
   });
 });

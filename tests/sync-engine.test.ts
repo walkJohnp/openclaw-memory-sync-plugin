@@ -1,19 +1,34 @@
 /**
  * SyncEngine tests
+ * Plugin → Sync Service architecture
  */
 
 import { SyncEngine } from '../src/sync';
 import { MemoryScanner } from '../src/scanner';
 import { ConfigManager } from '../src/config';
-import { SyncConfig, MemoryFile } from '../src/types';
+import { PluginConfig, MemoryFile } from '../src/types';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { createTempDir, cleanupTempDir, createMockFile } from './test-utils';
 
+// Mock the service client
+jest.mock('../src/service-client', () => {
+  return {
+    SyncServiceClient: jest.fn().mockImplementation(() => ({
+      health: jest.fn().mockResolvedValue({ status: 'healthy', version: '1.0.0' }),
+      listFiles: jest.fn().mockResolvedValue([]),
+      uploadFiles: jest.fn().mockResolvedValue([
+        { fileId: 'file-1', url: 'http://test/file-1', syncedAt: new Date().toISOString() }
+      ]),
+      deleteFile: jest.fn().mockResolvedValue(undefined),
+    })),
+  };
+});
+
 describe('SyncEngine', () => {
   let tempDir: string;
-  let config: SyncConfig;
+  let config: PluginConfig;
   let engine: SyncEngine;
 
   beforeEach(async () => {
@@ -24,13 +39,12 @@ describe('SyncEngine', () => {
         include: ['*.md'],
         exclude: [],
       },
-      target: {
-        folderToken: '',
-        docName: 'Test',
-        categorize: true,
+      service: {
+        serverUrl: 'http://localhost:8080',
+        apiKey: 'test-key',
+        timeout: 30000,
       },
       strategy: {
-        conflictResolution: 'local_priority',
         syncMode: 'incremental',
         deleteRemote: false,
       },
@@ -41,7 +55,6 @@ describe('SyncEngine', () => {
       advanced: {
         watch: false,
         compress: false,
-        keepHistory: true,
         logLevel: 'error',
       },
     };
@@ -58,7 +71,6 @@ describe('SyncEngine', () => {
       const scanner = new MemoryScanner(config);
       const localFiles = await scanner.scan();
 
-      // Access private method through any cast
       const plan = (engine as any).buildSyncPlan(localFiles, [], { files: [] });
 
       expect(plan.uploads).toHaveLength(1);
@@ -73,23 +85,20 @@ describe('SyncEngine', () => {
       // Simulate remote file exists with same hash
       const remoteFiles = [{
         path: 'MEMORY.md',
-        docId: 'doc1',
-        modifiedAt: new Date(),
-        content: localFiles[0].hash, // Remote has same hash
+        fileId: 'file-1',
+        hash: localFiles[0].hash,
       }];
 
-      // Simulate previous sync state with matching hash
       const state = {
         files: [{
           path: 'MEMORY.md',
-          hash: localFiles[0].hash, // Same hash as current file
+          hash: localFiles[0].hash,
           syncedAt: new Date(),
         }],
       };
 
       const plan = (engine as any).buildSyncPlan(localFiles, remoteFiles, state);
 
-      // File should not be in uploads since hash matches state and remote exists
       expect(plan.uploads).toHaveLength(0);
     });
 
@@ -111,48 +120,62 @@ describe('SyncEngine', () => {
 
       expect(plan.uploads).toHaveLength(1);
     });
-  });
 
-  describe('resolveConflict', () => {
-    it('should resolve with upload for local_priority', async () => {
-      const conflict = {
-        file: { path: 'test.md' } as MemoryFile,
-        remote: { path: 'test.md', docId: 'doc1', modifiedAt: new Date() },
-        type: 'modified_both' as const,
-      };
-
-      const result = await (engine as any).resolveConflict(conflict);
-
-      expect(result).toBe('upload');
-    });
-
-    it('should resolve with download for remote_priority', async () => {
-      config.strategy.conflictResolution = 'remote_priority';
+    it('should plan deletions when deleteRemote is true', async () => {
+      config.strategy.deleteRemote = true;
       engine = new SyncEngine(config);
 
-      const conflict = {
-        file: { path: 'test.md' } as MemoryFile,
-        remote: { path: 'test.md', docId: 'doc1', modifiedAt: new Date() },
-        type: 'modified_both' as const,
-      };
+      // No local files, but remote has one
+      const remoteFiles = [{
+        path: 'OLD.md',
+        fileId: 'file-old',
+        hash: 'hash-old',
+      }];
 
-      const result = await (engine as any).resolveConflict(conflict);
+      const plan = (engine as any).buildSyncPlan([], remoteFiles, { files: [] });
 
-      expect(result).toBe('download');
+      expect(plan.deletions).toHaveLength(1);
+      expect(plan.deletions[0]).toBe('file-old');
+    });
+  });
+
+  describe('sync', () => {
+    it('should complete successful sync', async () => {
+      await createMockFile(tempDir, 'MEMORY.md', '# Memory');
+
+      const result = await engine.sync();
+
+      expect(result.success).toBe(true);
+      expect(result.uploaded).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should fail when service is unavailable', async () => {
+      // Create new engine with mocked unavailable service
+      const { SyncServiceClient } = require('../src/service-client');
+      const originalImplementation = SyncServiceClient.getMockImplementation();
+      
+      SyncServiceClient.mockImplementationOnce(() => ({
+        health: jest.fn().mockResolvedValue(null),
+        listFiles: jest.fn().mockResolvedValue([]),
+      }));
+
+      const freshEngine = new SyncEngine(config);
+      const result = await freshEngine.sync();
+
+      expect(result.success).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
     });
   });
 
   describe('getStatus', () => {
     it('should return null lastSync when no previous sync', async () => {
-      // Create fresh temp dirs for this test
       const freshTempDir = await createTempDir();
       const freshStateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'state-fresh-'));
-      const freshConfig: SyncConfig = {
+      const freshConfig: PluginConfig = {
         ...config,
         source: { ...config.source, workspace: freshTempDir },
       };
       
-      // Create fresh config manager with isolated state
       const freshConfigManager = new ConfigManager(
         path.join(freshTempDir, 'config'),
         freshStateDir
@@ -163,6 +186,7 @@ describe('SyncEngine', () => {
 
       expect(status.lastSync).toBeNull();
       expect(status.fileCount).toBe(0);
+      expect(status.serviceStatus).toBe('connected');
       
       await cleanupTempDir(freshTempDir);
       await fs.rm(freshStateDir, { recursive: true, force: true });

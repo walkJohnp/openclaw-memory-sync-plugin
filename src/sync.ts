@@ -1,72 +1,75 @@
 /**
  * Sync Engine
- * Handles synchronization logic
+ * Plugin → Sync Service architecture
  */
 
 import { MemoryScanner } from './scanner';
-import { FeishuAdapter } from './feishu';
+import { SyncServiceClient } from './service-client';
 import { ConfigManager } from './config';
 import { 
   MemoryFile, 
-  SyncConfig, 
+  PluginConfig, 
   SyncPlan, 
   SyncResult, 
   SyncState,
   SyncedFileState,
-  RemoteFile,
-  Conflict,
+  UploadFileRequest,
 } from './types';
 import { hashesEqual } from './utils/hash';
 import { logger } from './utils/logger';
 
 export class SyncEngine {
-  private config: SyncConfig;
+  private config: PluginConfig;
   private scanner: MemoryScanner;
-  private feishu: FeishuAdapter;
+  private client: SyncServiceClient;
   private configManager: ConfigManager;
 
-  constructor(config: SyncConfig, configManager?: ConfigManager) {
+  constructor(config: PluginConfig, configManager?: ConfigManager) {
     this.config = config;
     this.scanner = new MemoryScanner(config);
-    this.feishu = new FeishuAdapter(config);
+    this.client = new SyncServiceClient(config.service);
     this.configManager = configManager || new ConfigManager();
   }
 
   /**
-   * Perform synchronization
+   * Perform synchronization to sync service
    */
   async sync(): Promise<SyncResult> {
     const startTime = Date.now();
-    logger.info('Starting memory sync...');
+    logger.info('Starting memory sync to service...');
 
     try {
+      // Check service health
+      const health = await this.client.health();
+      if (!health) {
+        throw new Error('Sync service is not available');
+      }
+      logger.info(`Connected to sync service v${health.version}`);
+
       // Load previous state
       const state = await this.configManager.loadState();
       
       // Scan local files
       logger.info('Scanning local files...');
       const localFiles = await this.scanner.scan();
+      logger.info(`Found ${localFiles.length} local files`);
       
-      // List remote files (for incremental sync)
-      let remoteFiles: RemoteFile[] = [];
+      // Get remote files from service (for incremental sync)
+      let remoteFiles: { path: string; hash: string; fileId: string }[] = [];
       if (this.config.strategy.syncMode === 'incremental') {
-        logger.info('Fetching remote files...');
-        remoteFiles = await this.feishu.listRemoteFiles();
+        logger.info('Fetching remote file list from service...');
+        const files = await this.client.listFiles();
+        remoteFiles = files.map(f => ({ path: f.path, hash: f.hash, fileId: f.fileId }));
+        logger.info(`Found ${remoteFiles.length} remote files`);
       }
 
       // Build sync plan
       logger.info('Building sync plan...');
       const plan = this.buildSyncPlan(localFiles, remoteFiles, state);
+      logger.info(`Sync plan: ${plan.uploads.length} uploads, ${plan.deletions.length} deletions`);
       
       // Execute sync plan
-      logger.info(`Sync plan: ${plan.uploads.length} uploads, ${plan.downloads.length} downloads, ${plan.conflicts.length} conflicts`);
-      
-      const result = await this.executeSyncPlan(plan);
-      
-      // Save state
-      if (result.success) {
-        await this.saveSyncState(localFiles, result);
-      }
+      const result = await this.executeSyncPlan(plan, localFiles);
 
       result.duration = Date.now() - startTime;
       logger.info(`Sync completed in ${result.duration}ms`);
@@ -78,13 +81,11 @@ export class SyncEngine {
       return {
         success: false,
         uploaded: 0,
-        downloaded: 0,
-        conflicts: 0,
         deleted: 0,
         errors: [{
           path: '',
           operation: 'upload',
-          message: 'Sync failed',
+          message: error instanceof Error ? error.message : 'Sync failed',
           error: error as Error,
         }],
         duration: Date.now() - startTime,
@@ -97,13 +98,11 @@ export class SyncEngine {
    */
   private buildSyncPlan(
     localFiles: MemoryFile[],
-    remoteFiles: RemoteFile[],
+    remoteFiles: { path: string; hash: string; fileId: string }[],
     state: { files: SyncedFileState[] }
   ): SyncPlan {
     const uploads: MemoryFile[] = [];
-    const downloads: RemoteFile[] = [];
-    const conflicts: Conflict[] = [];
-    const deletions: RemoteFile[] = [];
+    const deletions: string[] = [];
 
     const remoteMap = new Map(remoteFiles.map(f => [f.path, f]));
     const localMap = new Map(localFiles.map(f => [f.path, f]));
@@ -117,19 +116,14 @@ export class SyncEngine {
       if (!remoteFile) {
         // New file - upload
         uploads.push(localFile);
-      } else if (!stateFile || !hashesEqual(localFile.hash, stateFile.hash)) {
-        // Modified file - check for conflict
-        if (remoteFile && stateFile && !hashesEqual(remoteFile.content || '', stateFile.hash)) {
-          // Conflict: both modified
-          conflicts.push({
-            file: localFile,
-            remote: remoteFile,
-            type: 'modified_both',
-          });
-        } else {
-          // No conflict - upload
-          uploads.push(localFile);
-        }
+        logger.debug(`Plan: upload new file ${localFile.path}`);
+      } else if (!hashesEqual(localFile.hash, remoteFile.hash)) {
+        // Modified file - upload
+        uploads.push(localFile);
+        logger.debug(`Plan: upload modified file ${localFile.path}`);
+      } else {
+        // Unchanged - skip
+        logger.debug(`Plan: skip unchanged file ${localFile.path}`);
       }
     }
 
@@ -137,64 +131,81 @@ export class SyncEngine {
     if (this.config.strategy.deleteRemote) {
       for (const remoteFile of remoteFiles) {
         if (!localMap.has(remoteFile.path)) {
-          deletions.push(remoteFile);
+          deletions.push(remoteFile.fileId);
+          logger.debug(`Plan: delete remote file ${remoteFile.path}`);
         }
       }
     }
 
-    return { uploads, downloads, conflicts, deletions };
+    return { uploads, deletions };
   }
 
   /**
    * Execute sync plan
    */
-  private async executeSyncPlan(plan: SyncPlan): Promise<SyncResult> {
+  private async executeSyncPlan(
+    plan: SyncPlan, 
+    localFiles: MemoryFile[]
+  ): Promise<SyncResult> {
     const result: SyncResult = {
       success: true,
       uploaded: 0,
-      downloaded: 0,
-      conflicts: plan.conflicts.length,
       deleted: 0,
       errors: [],
       duration: 0,
     };
 
-    // Handle conflicts
-    if (plan.conflicts.length > 0) {
-      logger.warn(`Found ${plan.conflicts.length} conflicts`);
-      for (const conflict of plan.conflicts) {
-        const resolution = await this.resolveConflict(conflict);
-        if (resolution === 'upload') {
-          plan.uploads.push(conflict.file);
-        } else if (resolution === 'download') {
-          plan.downloads.push(conflict.remote);
-        }
-      }
-    }
-
     // Upload files
     if (plan.uploads.length > 0) {
-      logger.info(`Uploading ${plan.uploads.length} files...`);
-      const uploadResults = await this.feishu.uploadFiles(plan.uploads);
-      result.uploaded = uploadResults.length;
+      logger.info(`Uploading ${plan.uploads.length} files to sync service...`);
       
-      if (uploadResults.length !== plan.uploads.length) {
-        result.errors.push(...this.buildUploadErrors(plan.uploads, uploadResults));
+      const uploadRequests: UploadFileRequest[] = plan.uploads.map(file => ({
+        path: file.path,
+        type: file.type,
+        content: file.content,
+        size: file.size,
+        hash: file.hash,
+        modifiedAt: file.modifiedAt.toISOString(),
+      }));
+
+      try {
+        const uploadResults = await this.client.uploadFiles(uploadRequests);
+        result.uploaded = uploadResults.length;
+        
+        // Save state for uploaded files
+        const syncedFiles: SyncedFileState[] = plan.uploads.map((file, index) => ({
+          path: file.path,
+          hash: file.hash,
+          syncedAt: new Date(),
+          remoteFileId: uploadResults[index]?.fileId,
+        }));
+        
+        await this.saveSyncState(localFiles, syncedFiles);
+        
+        logger.info(`Successfully uploaded ${uploadResults.length} files`);
+      } catch (error) {
+        result.errors.push({
+          path: '',
+          operation: 'upload',
+          message: error instanceof Error ? error.message : 'Upload failed',
+          error: error as Error,
+        });
       }
     }
 
     // Delete remote files
     if (plan.deletions.length > 0) {
       logger.info(`Deleting ${plan.deletions.length} remote files...`);
-      for (const file of plan.deletions) {
+      
+      for (const fileId of plan.deletions) {
         try {
-          await this.feishu.deleteRemoteFile(file.docId);
+          await this.client.deleteFile(fileId);
           result.deleted++;
         } catch (error) {
           result.errors.push({
-            path: file.path,
+            path: fileId,
             operation: 'delete',
-            message: 'Failed to delete',
+            message: error instanceof Error ? error.message : 'Delete failed',
             error: error as Error,
           });
         }
@@ -206,70 +217,48 @@ export class SyncEngine {
   }
 
   /**
-   * Resolve conflict based on strategy
-   */
-  private async resolveConflict(conflict: Conflict): Promise<'upload' | 'download' | 'skip'> {
-    switch (this.config.strategy.conflictResolution) {
-      case 'local_priority':
-        logger.debug(`Conflict resolved: upload local (local_priority)`);
-        return 'upload';
-      case 'remote_priority':
-        logger.debug(`Conflict resolved: download remote (remote_priority)`);
-        return 'download';
-      case 'manual':
-        // In manual mode, we would prompt user - for now default to local
-        logger.warn(`Conflict in ${conflict.file.path} - using local (manual mode not implemented)`);
-        return 'upload';
-      default:
-        return 'upload';
-    }
-  }
-
-  /**
    * Save sync state
    */
-  private async saveSyncState(localFiles: MemoryFile[], result: SyncResult): Promise<void> {
-    const state: { lastSyncAt: string | null; files: SyncedFileState[] } = {
-      lastSyncAt: new Date().toISOString(),
-      files: localFiles.map(f => ({
-        path: f.path,
-        hash: f.hash,
-        syncedAt: new Date(),
-      })),
+  private async saveSyncState(
+    localFiles: MemoryFile[], 
+    syncedFiles: SyncedFileState[]
+  ): Promise<void> {
+    const stateMap = new Map(syncedFiles.map(f => [f.path, f]));
+    
+    // Merge with existing state
+    const state: SyncState = {
+      lastSyncAt: new Date(),
+      files: localFiles.map(f => {
+        const synced = stateMap.get(f.path);
+        return synced || {
+          path: f.path,
+          hash: f.hash,
+          syncedAt: new Date(),
+        };
+      }),
     };
 
-    await this.configManager.saveState(state);
-  }
-
-  /**
-   * Build upload errors from results
-   */
-  private buildUploadErrors(files: MemoryFile[], results: { path: string }[]): { path: string; operation: 'upload'; message: string; error: Error }[] {
-    const resultPaths = new Set(results.map(r => r.path));
-    const errors: { path: string; operation: 'upload'; message: string; error: Error }[] = [];
-
-    for (const file of files) {
-      if (!resultPaths.has(file.path)) {
-        errors.push({
-          path: file.path,
-          operation: 'upload',
-          message: 'Upload failed',
-          error: new Error('Unknown error'),
-        });
-      }
-    }
-
-    return errors;
+    await this.configManager.saveState({
+      lastSyncAt: state.lastSyncAt ? state.lastSyncAt.toISOString() : null,
+      files: state.files,
+    });
   }
 
   /**
    * Get sync status
    */
-  async getStatus(): Promise<{ lastSync: Date | null; fileCount: number }> {
+  async getStatus(): Promise<{ 
+    lastSync: Date | null; 
+    fileCount: number;
+    serviceStatus: 'connected' | 'disconnected';
+  }> {
     const state = await this.configManager.loadState();
+    const health = await this.client.health();
+    
     return {
       lastSync: state.lastSyncAt ? new Date(state.lastSyncAt) : null,
       fileCount: state.files.length,
+      serviceStatus: health ? 'connected' : 'disconnected',
     };
   }
 }

@@ -6,14 +6,14 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { glob } from 'glob';
-import { MemoryFile, MemoryFileType, SyncConfig } from './types';
+import { MemoryFile, MemoryFileType, PluginConfig } from './types';
 import { calculateHash } from './utils/hash';
 import { logger } from './utils/logger';
 
 export class MemoryScanner {
-  private config: SyncConfig;
+  private config: PluginConfig;
 
-  constructor(config: SyncConfig) {
+  constructor(config: PluginConfig) {
     this.config = config;
   }
 

@@ -1,88 +1,134 @@
 # OpenClaw Memory Sync Plugin
 
-🧠 将 OpenClaw Agent 的记忆同步到飞书云端
+OpenClaw Agent 记忆同步插件 - 将本地记忆文件同步到同步服务。
 
-## 功能特性
+## 架构
 
-- 📁 **智能采集** - 自动扫描 MEMORY.md、每日记忆、配置等文件
-- ☁️ **云端同步** - 一键同步到飞书文档，支持分类存储
-- 🔄 **增量同步** - 只同步变更内容，高效省流
-- ⏰ **定时任务** - 支持自动定时同步
-- 🔒 **安全可控** - 支持排除敏感文件，冲突处理策略可配置
+```
+┌─────────────────┐     HTTP API      ┌─────────────────┐
+│  Memory Plugin  │ ─────────────────→ │  Sync Service   │
+│  (This Repo)    │                    │  (Separate)     │
+└─────────────────┘                    └─────────────────┘
+                                              │
+                                              │ (内部处理)
+                                              ▼
+                                       ┌─────────────────┐
+                                       │  PostgreSQL     │
+                                       │  MinIO          │
+                                       └─────────────────┘
+```
 
-## 快速开始
+## 功能
 
-### 安装依赖
+- 📁 扫描本地记忆文件（MEMORY.md, memory/*.md, 配置等）
+- 🔄 增量同步到同步服务
+- 🔐 API 密钥认证
+- 📊 同步状态追踪
+- 👀 文件监控（可选）
+
+## 安装
 
 ```bash
-cd ~/.openclaw/extensions/memory-sync
 npm install
 npm run build
 ```
 
-### 初始化配置
-
-```bash
-npm run config -- init
-# 或使用向导
-npm run config -- wizard
-```
-
-### 执行同步
-
-```bash
-npm run sync
-```
-
-## 配置说明
+## 配置
 
 配置文件位置：`~/.openclaw/config/memory-sync.yaml`
 
 ```yaml
 memory_sync:
   source:
-    workspace: "~/.openclaw/workspace/pm"
+    workspace: /home/user/.openclaw/workspace/pm
     include:
-      - "MEMORY.md"
-      - "memory/*.md"
-      - "AGENTS.md"
-      - "SOUL.md"
+      - MEMORY.md
+      - memory/*.md
+      - AGENTS.md
+      - SOUL.md
+      - USER.md
+      - HEARTBEAT.md
+      - TOOLS.md
+      - IDENTITY.md
     exclude:
-      - "*.secret.md"
+      - '*.secret.md'
+      - node_modules/**
   
-  target:
-    doc_name: "OpenClaw记忆中心"
-    categorize: true  # 按类型分类存储
+  service:
+    serverUrl: http://localhost:8080
+    apiKey: ''
+    timeout: 30000
   
   strategy:
-    conflict_resolution: "local_priority"  # 冲突解决策略
-    sync_mode: "incremental"               # 增量同步
+    syncMode: incremental
+    deleteRemote: false
   
   schedule:
     enabled: false
-    interval: "1h"
+    interval: 1h
+  
+  advanced:
+    watch: false
+    compress: false
+    logLevel: info
 ```
 
-## 文档结构
+## 使用
 
-同步到飞书后的文档结构：
+### 命令行
 
+```bash
+# 初始化配置
+npm run init
+
+# 执行同步
+npm run sync
+
+# 查看状态
+npm run status
+
+# 配置服务地址
+npm run config -- --server http://sync.example.com --api-key xxx
 ```
-OpenClaw记忆中心
-├── 🧠 长期记忆 (MEMORY.md)
-├── 📅 每日记忆 (memory/*.md)
-├── ⚙️ 配置 (AGENTS.md, USER.md)
-├── 👤 身份定义 (SOUL.md, IDENTITY.md)
-├── 💓 心跳配置 (HEARTBEAT.md)
-└── 🛠️ 工具配置 (TOOLS.md)
+
+### 程序化使用
+
+```typescript
+import { SyncEngine, ConfigManager } from 'memory-sync';
+
+const configManager = new ConfigManager();
+const config = await configManager.load();
+
+const engine = new SyncEngine(config);
+const result = await engine.sync();
+
+console.log(`Uploaded: ${result.uploaded}`);
+console.log(`Errors: ${result.errors.length}`);
 ```
 
-## 开发计划
+## API
 
-- [x] Phase 1: 基础框架搭建
-- [ ] Phase 2: 飞书 API 集成
-- [ ] Phase 3: 增量同步与定时任务
-- [ ] Phase 4: 实时监听与版本历史
+插件通过 HTTP API 与同步服务通信：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/health | 健康检查 |
+| GET | /api/files | 获取已同步文件列表 |
+| POST | /api/files/upload | 上传文件 |
+| DELETE | /api/files/:id | 删除文件 |
+
+## 开发
+
+```bash
+# 开发模式
+npm run dev
+
+# 运行测试
+npm test
+
+# 构建
+npm run build
+```
 
 ## License
 

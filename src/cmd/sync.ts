@@ -1,6 +1,6 @@
 /**
  * Sync Command
- * CLI entry point for memory sync
+ * CLI entry point for memory sync - Plugin → Sync Service
  */
 
 import { ConfigManager } from '../config';
@@ -22,9 +22,8 @@ async function main() {
     // Show config summary
     console.log('Configuration:');
     console.log(`  Workspace: ${config.source.workspace}`);
-    console.log(`  Target: ${config.target.docName}`);
+    console.log(`  Sync Service: ${config.service.serverUrl}`);
     console.log(`  Mode: ${config.strategy.syncMode}`);
-    console.log(`  Conflict: ${config.strategy.conflictResolution}`);
     console.log();
 
     // Perform sync
@@ -35,8 +34,6 @@ async function main() {
     console.log('\n📊 Sync Results:');
     console.log(`  Status: ${result.success ? '✅ Success' : '❌ Failed'}`);
     console.log(`  Uploaded: ${result.uploaded}`);
-    console.log(`  Downloaded: ${result.downloaded}`);
-    console.log(`  Conflicts: ${result.conflicts}`);
     console.log(`  Deleted: ${result.deleted}`);
     console.log(`  Duration: ${result.duration}ms`);
 
